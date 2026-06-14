@@ -3,14 +3,13 @@
 # start.sh - Start backend and frontend together
 # Run: bash start.sh
 # =============================================================
-
 echo "🛡️  Starting AI Threat Detection Platform..."
 
 # Start backend in background
 echo "🔥 Starting FastAPI backend on port 8000..."
 source venv/bin/activate
 cd backend
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload &
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload &
 BACKEND_PID=$!
 cd ..
 
