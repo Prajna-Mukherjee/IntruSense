@@ -3,18 +3,11 @@
 # setup.sh - Full project setup script
 # Run: bash setup.sh
 # =============================================================
-
 set -e
+
 echo "🚀 Setting up AI Threat Detection Platform..."
 
-# 1. Initialize Git
-echo ""
-echo "📦 Initializing Git repository..."
-git init
-git add .
-git commit -m "Initial commit: AI Threat Detection Platform"
-
-# 2. Backend virtual environment
+# 1. Backend virtual environment
 echo ""
 echo "🐍 Creating Python virtual environment..."
 python3 -m venv venv
@@ -27,7 +20,7 @@ deactivate
 
 echo "✅ Backend environment ready."
 
-# 3. Frontend dependencies
+# 2. Frontend dependencies
 echo ""
 echo "⚛️  Installing frontend dependencies..."
 cd frontend
@@ -36,15 +29,30 @@ cd ..
 
 echo "✅ Frontend ready."
 
-# 4. Create data directory
+# 3. Create data directory
 mkdir -p data
 
-# 5. Train demo models
+# 4. Check for .env file
 echo ""
-echo "🤖 Training demo AI models..."
-source venv/bin/activate
-python scripts/train_models.py
-deactivate
+if [ ! -f backend/.env ]; then
+    echo "⚠️  No backend/.env file found."
+    echo "   Copy backend/.env.example to backend/.env and fill in your credentials."
+    echo "   Then run: bash start.sh"
+else
+    echo "✅ .env file found."
+fi
+
+# 5. Train demo models (optional — only if models don't exist)
+echo ""
+if [ ! -f backend/models/xgboost_model.pkl ]; then
+    echo "🤖 No trained models found. Training demo AI models..."
+    source venv/bin/activate
+    python scripts/train_models.py
+    deactivate
+    echo "✅ Models trained."
+else
+    echo "✅ Trained models already exist — skipping training."
+fi
 
 echo ""
 echo "🎉 Setup complete!"
