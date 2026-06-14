@@ -9,6 +9,6 @@
 **Prajna Mukherjee**  
 MCA Student · Cybersecurity Enthusiast · Red Teaming  
 📧 prajnamukherjee@gmail.com  
-🔗 [GitHub](https://github.com/Prajna-Mukherjee) · [LinkedIn](https://linkedin.com/in/prajna-mukherjee)
+🔗 [GitHub](https://github.com/Prajna-Mukherjee) 
 
 ---
