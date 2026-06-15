@@ -53,98 +53,52 @@ export default function Login() {
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@700;900&family=JetBrains+Mono:wght@400;500&display=swap');
-
-        @keyframes slideIn {
-          from { opacity: 0; transform: translateX(40px); }
-          to   { opacity: 1; transform: translateX(0); }
-        }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(16px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes scanline {
-          0%   { top: -4px; }
-          100% { top: 100%; }
-        }
-        @keyframes pulse-ring {
-          0%   { box-shadow: 0 0 0 0 rgba(0,212,255,0.5); }
-          70%  { box-shadow: 0 0 0 12px rgba(0,212,255,0); }
-          100% { box-shadow: 0 0 0 0 rgba(0,212,255,0); }
-        }
-        @keyframes hexPulse {
-          0%, 100% { opacity: 0.8; transform: scale(1); }
-          50%       { opacity: 1;   transform: scale(1.04); }
-        }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-
+        @keyframes slideIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes scanline { 0% { top: -4px; } 100% { top: 100%; } }
+        @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(0,212,255,0.5); } 70% { box-shadow: 0 0 0 12px rgba(0,212,255,0); } 100% { box-shadow: 0 0 0 0 rgba(0,212,255,0); } }
+        @keyframes hexPulse { 0%, 100% { opacity: 0.8; transform: scale(1); } 50% { opacity: 1; transform: scale(1.04); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
         .login-input {
-          width: 100%;
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(0,212,255,0.25);
-          border-radius: 10px;
-          padding: 14px 16px 14px 46px;
-          color: #e2e8f0;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 13px;
-          outline: none;
-          transition: all 0.3s;
-          box-sizing: border-box;
+          width: 100%; background: rgba(255,255,255,0.04);
+          border: 1px solid rgba(0,212,255,0.25); border-radius: 10px;
+          padding: 14px 16px 14px 46px; color: #e2e8f0;
+          font-family: 'JetBrains Mono', monospace; font-size: 13px;
+          outline: none; transition: all 0.3s; box-sizing: border-box;
         }
         .login-input::placeholder { color: #475569; }
         .login-input:focus {
-          border-color: rgba(0,212,255,0.7);
-          background: rgba(0,212,255,0.06);
+          border-color: rgba(0,212,255,0.7); background: rgba(0,212,255,0.06);
           box-shadow: 0 0 20px rgba(0,212,255,0.12);
         }
-
         .login-btn {
           width: 100%; padding: 15px;
           background: linear-gradient(135deg, #0284c7 0%, #2563eb 50%, #7c3aed 100%);
-          background-size: 200%;
-          border: none; border-radius: 10px;
-          color: #fff;
-          font-family: 'Orbitron', sans-serif;
-          font-size: 14px; font-weight: 700; letter-spacing: 3px;
-          cursor: pointer; transition: all 0.3s;
+          border: none; border-radius: 10px; color: #fff;
+          font-family: 'Orbitron', sans-serif; font-size: 14px;
+          font-weight: 700; letter-spacing: 3px; cursor: pointer; transition: all 0.3s;
         }
-        .login-btn:hover:not(:disabled) {
-          transform: translateY(-1px);
-          box-shadow: 0 8px 30px rgba(37,99,235,0.45);
-        }
+        .login-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(37,99,235,0.45); }
         .login-btn:disabled { opacity: 0.7; cursor: not-allowed; }
-
         .oauth-btn {
           width: 100%; padding: 12px 16px;
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.1);
+          background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
           border-radius: 10px; color: #cbd5e1;
-          font-family: 'Rajdhani', sans-serif;
-          font-size: 14px; font-weight: 600; letter-spacing: 0.8px;
-          cursor: pointer;
-          display: flex; align-items: center;
-          justify-content: center; gap: 10px;
+          font-family: 'Rajdhani', sans-serif; font-size: 14px;
+          font-weight: 600; letter-spacing: 0.8px; cursor: pointer;
+          display: flex; align-items: center; justify-content: center; gap: 10px;
           transition: all 0.25s;
         }
         .oauth-btn:hover {
-          background: rgba(255,255,255,0.08);
-          border-color: rgba(0,212,255,0.4);
+          background: rgba(255,255,255,0.08); border-color: rgba(0,212,255,0.4);
           color: #fff; transform: translateY(-1px);
         }
       `}</style>
 
-      {/* ══ LEFT — static image panel ══ */}
+      {/* ══ LEFT — image panel ══ */}
       <div style={{ flex: "0 0 58%", position: "relative", overflow: "hidden" }}>
-        <img
-          src={brainBg}
-          alt="IntruSense AI background"
-          style={{
-            width: "100%", height: "100%",
-            objectFit: "cover", objectPosition: "center",
-            display: "block"
-          }}
-        />
+        <img src={brainBg} alt="IntruSense AI background"
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
         <div style={{
           position: "absolute", inset: 0,
           background: "linear-gradient(to right, transparent 60%, rgba(8,15,30,0.85) 100%)",
@@ -168,10 +122,9 @@ export default function Login() {
             fontSize: 18, animation: "pulse-ring 2.5s ease-in-out infinite"
           }}>🛡️</div>
           <div>
-            <div style={{
-              fontFamily: "'Orbitron', sans-serif", fontSize: 11,
-              fontWeight: 700, color: "#00d4ff", letterSpacing: 2
-            }}>AI POWERED. THREAT AWARE.</div>
+            <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, fontWeight: 700, color: "#00d4ff", letterSpacing: 2 }}>
+              AI POWERED. THREAT AWARE.
+            </div>
             <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
               Intelligent Detection. Real-time Protection.
             </div>
@@ -181,8 +134,7 @@ export default function Login() {
 
       {/* ══ RIGHT — login form ══ */}
       <div style={{
-        flex: "0 0 42%",
-        display: "flex", flexDirection: "column",
+        flex: "0 0 42%", display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center",
         background: "linear-gradient(160deg, #080f1e 0%, #0a1220 100%)",
         padding: "40px 48px", position: "relative",
@@ -191,7 +143,7 @@ export default function Login() {
       }}>
         <div style={{ width: "100%", maxWidth: 380 }}>
 
-          {/* Logo block */}
+          {/* Logo */}
           <div style={{ textAlign: "center", marginBottom: 32, animation: "fadeUp 0.6s 0.1s both" }}>
             <div style={{
               width: 68, height: 68, margin: "0 auto 14px",
@@ -201,19 +153,15 @@ export default function Login() {
               fontSize: 30, animation: "hexPulse 3s ease-in-out infinite",
               boxShadow: "0 0 28px rgba(0,212,255,0.15)"
             }}>🧠</div>
-
             <h1 style={{
               fontFamily: "'Orbitron', sans-serif", fontSize: 28, fontWeight: 900,
               margin: "0 0 5px", letterSpacing: 1,
               background: "linear-gradient(135deg, #00d4ff, #2563eb, #a855f7)",
-              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-              backgroundClip: "text"
+              WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text"
             }}>IntruSense</h1>
-
             <p style={{
               fontFamily: "'Rajdhani', sans-serif", fontSize: 11,
-              color: "#475569", margin: 0, letterSpacing: 2,
-              textTransform: "uppercase"
+              color: "#475569", margin: 0, letterSpacing: 2, textTransform: "uppercase"
             }}>AI-Powered Network Intrusion Detection System</p>
           </div>
 
@@ -236,49 +184,36 @@ export default function Login() {
             <div style={{ position: "relative" }}>
               <span style={{
                 position: "absolute", left: 14, top: "50%",
-                transform: "translateY(-50%)", color: "#475569",
-                fontSize: 15, pointerEvents: "none"
+                transform: "translateY(-50%)", color: "#475569", fontSize: 15, pointerEvents: "none"
               }}>👤</span>
-              <input
-                type="email"
-                placeholder="Email Address"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="login-input"
-                required
-              />
+              <input type="email" placeholder="Email Address"
+                value={email} onChange={e => setEmail(e.target.value)}
+                className="login-input" required />
             </div>
 
             {/* Password */}
             <div style={{ position: "relative" }}>
               <span style={{
                 position: "absolute", left: 14, top: "50%",
-                transform: "translateY(-50%)", color: "#475569",
-                fontSize: 15, pointerEvents: "none"
+                transform: "translateY(-50%)", color: "#475569", fontSize: 15, pointerEvents: "none"
               }}>🔒</span>
               <input
                 type={showPass ? "text" : "password"}
                 placeholder="Password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className="login-input"
-                required
-                style={{ paddingRight: 46 }}
+                value={password} onChange={e => setPassword(e.target.value)}
+                className="login-input" required style={{ paddingRight: 46 }}
               />
               <button type="button" onClick={() => setShowPass(v => !v)} style={{
                 position: "absolute", right: 14, top: "50%",
                 transform: "translateY(-50%)", background: "none",
-                border: "none", color: "#475569", cursor: "pointer",
-                fontSize: 15, padding: 0, lineHeight: 1
+                border: "none", color: "#475569", cursor: "pointer", fontSize: 15, padding: 0
               }}>{showPass ? "🙈" : "👁️"}</button>
             </div>
 
             {/* Remember + Forgot */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <label
-                style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
-                onClick={() => setRemember(v => !v)}
-              >
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+                onClick={() => setRemember(v => !v)}>
                 <div style={{
                   width: 16, height: 16, borderRadius: 4, flexShrink: 0,
                   border: "1.5px solid rgba(0,212,255,0.5)", transition: "all 0.2s",
@@ -291,24 +226,26 @@ export default function Login() {
                   Remember me
                 </span>
               </label>
-              <button type="button" style={{
-                background: "none", border: "none", color: "#0284c7",
-                fontSize: 13, cursor: "pointer",
-                fontFamily: "'Rajdhani', sans-serif", fontWeight: 600
-              }}>Forgot Password?</button>
+
+              {/* ── FIX: Forgot Password now navigates to the forgot password page ── */}
+              <button
+                type="button"
+                onClick={() => navigate("/forgot-password")}
+                style={{
+                  background: "none", border: "none", color: "#0284c7",
+                  fontSize: 13, cursor: "pointer",
+                  fontFamily: "'Rajdhani', sans-serif", fontWeight: 600
+                }}
+              >Forgot Password?</button>
             </div>
 
             {/* Error */}
             {error && (
               <div style={{
-                background: "rgba(239,68,68,0.1)",
-                border: "1px solid rgba(239,68,68,0.4)",
-                borderRadius: "8px", padding: "10px 14px",
-                fontSize: "13px", color: "#f87171",
-                fontFamily: "'Rajdhani', sans-serif"
-              }}>
-                ⚠️ {error}
-              </div>
+                background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)",
+                borderRadius: "8px", padding: "10px 14px", fontSize: "13px",
+                color: "#f87171", fontFamily: "'Rajdhani', sans-serif"
+              }}>⚠️ {error}</div>
             )}
 
             {/* Login button */}
@@ -337,7 +274,7 @@ export default function Login() {
             <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.07)" }} />
           </div>
 
-          {/* OAuth button */}
+          {/* OAuth */}
           <div style={{ display: "flex", flexDirection: "column", gap: 9, animation: "fadeUp 0.6s 0.5s both" }}>
             <button className="oauth-btn" onClick={() => handleOAuth("Google")}>
               <svg width="17" height="17" viewBox="0 0 24 24">
@@ -350,12 +287,10 @@ export default function Login() {
             </button>
           </div>
 
-          {/* Footer link */}
+          {/* Register link */}
           <p style={{
-            textAlign: "center", marginTop: 24,
-            fontSize: 13, color: "#334155",
-            fontFamily: "'Rajdhani', sans-serif",
-            animation: "fadeUp 0.6s 0.6s both"
+            textAlign: "center", marginTop: 24, fontSize: 13, color: "#334155",
+            fontFamily: "'Rajdhani', sans-serif", animation: "fadeUp 0.6s 0.6s both"
           }}>
             Don't have an account?{" "}
             <button style={{
@@ -367,8 +302,7 @@ export default function Login() {
         </div>
 
         <p style={{
-          position: "absolute", bottom: 18,
-          fontSize: 11, color: "#1e293b",
+          position: "absolute", bottom: 18, fontSize: 11, color: "#1e293b",
           fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1, margin: 0
         }}>© 2026 IntruSense AI NIDS. All rights reserved.</p>
       </div>

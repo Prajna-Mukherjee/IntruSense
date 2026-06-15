@@ -17,6 +17,7 @@ from typing import Optional
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 
 from services.prediction_service import PredictionService
 from services.shap_service import SHAPService
@@ -30,9 +31,11 @@ GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REDIRECT_URI  = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
 FRONTEND_URL         = os.getenv("FRONTEND_URL", "http://localhost:3000")
+MAIL_USERNAME        = os.getenv("MAIL_USERNAME", "")
+MAIL_PASSWORD        = os.getenv("MAIL_PASSWORD", "")
 
 # ── Upload limits ─────────────────────────────────────────────────────────────
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024   # 10 MB
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_CSV_ROWS     = 5_000
 
 # ── Allowed origins ───────────────────────────────────────────────────────────
@@ -42,40 +45,20 @@ ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 # ── Rate limiter ──────────────────────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address)
 
-# ── Bulk-delete confirmation token store ──────────────────────────────────────
-# A two-step process for the destructive DELETE /api/logs endpoint:
-#
-#   Step 1 — client calls POST /api/logs/delete-confirm
-#            → server issues a short-lived confirmation token tied to the user
-#   Step 2 — client calls DELETE /api/logs?confirm_token=<token>
-#            → server redeems the token and performs the deletion
-#
-# This means a stray / replayed DELETE request with no token is always rejected,
-# even if the attacker has a valid JWT.
-_delete_confirm_tokens: dict = {}
-
-def _issue_delete_token(user_email: str) -> str:
-    token = secrets.token_urlsafe(32)
-    _delete_confirm_tokens[token] = {
-        "user_email": user_email,
-        "expires_at": datetime.utcnow() + timedelta(seconds=60)
-    }
-    return token
-
-def _redeem_delete_token(token: str, user_email: str) -> bool:
-    """
-    Returns True only if the token exists, has not expired,
-    and belongs to the requesting user. Always deletes the token
-    on first use regardless of outcome (single-use).
-    """
-    entry = _delete_confirm_tokens.pop(token, None)
-    if not entry:
-        return False
-    if datetime.utcnow() > entry["expires_at"]:
-        return False
-    if entry["user_email"] != user_email:
-        return False
-    return True
+# ── Mail config ───────────────────────────────────────────────────────────────
+mail_config = ConnectionConfig(
+    MAIL_USERNAME=MAIL_USERNAME,
+    MAIL_PASSWORD=MAIL_PASSWORD,
+    MAIL_FROM=MAIL_USERNAME,
+    MAIL_FROM_NAME="IntruSense NIDS",
+    MAIL_PORT=587,
+    MAIL_SERVER="smtp.gmail.com",
+    MAIL_STARTTLS=True,
+    MAIL_SSL_TLS=False,
+    USE_CREDENTIALS=True,
+    VALIDATE_CERTS=True
+)
+fast_mail = FastMail(mail_config) if MAIL_USERNAME and MAIL_PASSWORD else None
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="IntruSense AI Threat Detection Platform", version="2.0.0")
@@ -121,6 +104,27 @@ def _redeem_oauth_code(code: str) -> Optional[dict]:
         return None
     return entry
 
+# ── Bulk delete confirmation token store ──────────────────────────────────────
+_delete_confirm_tokens: dict = {}
+
+def _issue_delete_token(user_email: str) -> str:
+    token = secrets.token_urlsafe(32)
+    _delete_confirm_tokens[token] = {
+        "user_email": user_email,
+        "expires_at": datetime.utcnow() + timedelta(seconds=60)
+    }
+    return token
+
+def _redeem_delete_token(token: str, user_email: str) -> bool:
+    entry = _delete_confirm_tokens.pop(token, None)
+    if not entry:
+        return False
+    if datetime.utcnow() > entry["expires_at"]:
+        return False
+    if entry["user_email"] != user_email:
+        return False
+    return True
+
 # ── Startup ───────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
@@ -130,6 +134,8 @@ async def startup_event():
     print(f"🌐 CORS allowed origins: {ALLOWED_ORIGINS}")
     if not GOOGLE_CLIENT_ID:
         print("⚠️  GOOGLE_CLIENT_ID not set — Google OAuth disabled")
+    if not MAIL_USERNAME:
+        print("⚠️  MAIL_USERNAME not set — password reset emails disabled")
 
 # ── JWT helpers ───────────────────────────────────────────────────────────────
 def get_user_email(authorization: str = "") -> str:
@@ -153,6 +159,72 @@ def require_auth(authorization: str) -> str:
             detail="Authentication required. Please provide a valid Bearer token."
         )
     return user_email
+
+# ── Email helper ──────────────────────────────────────────────────────────────
+async def send_reset_email(email: str, reset_token: str):
+    """Send a password reset email with the reset link."""
+    reset_link = f"{FRONTEND_URL}/reset-password?token={reset_token}"
+
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;
+                background: #0a0e1a; color: #e2e8f0; padding: 40px; border-radius: 12px;">
+
+        <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #00d4ff; font-size: 28px; margin: 0;">🛡️ IntruSense</h1>
+            <p style="color: #64748b; font-size: 12px; letter-spacing: 2px;">
+                AI-POWERED NETWORK INTRUSION DETECTION SYSTEM
+            </p>
+        </div>
+
+        <h2 style="color: #e2e8f0; font-size: 20px;">Password Reset Request</h2>
+
+        <p style="color: #94a3b8; line-height: 1.6;">
+            We received a request to reset the password for your IntruSense account
+            associated with this email address.
+        </p>
+
+        <p style="color: #94a3b8; line-height: 1.6;">
+            Click the button below to reset your password. This link will expire in
+            <strong style="color: #00d4ff;">30 minutes</strong>.
+        </p>
+
+        <div style="text-align: center; margin: 35px 0;">
+            <a href="{reset_link}"
+               style="background: linear-gradient(135deg, #0284c7, #2563eb, #7c3aed);
+                      color: #ffffff; padding: 14px 32px; border-radius: 8px;
+                      text-decoration: none; font-weight: bold; font-size: 15px;
+                      letter-spacing: 1px; display: inline-block;">
+                RESET MY PASSWORD
+            </a>
+        </div>
+
+        <p style="color: #64748b; font-size: 13px; line-height: 1.6;">
+            If the button does not work, copy and paste this link into your browser:
+            <br/>
+            <a href="{reset_link}" style="color: #00d4ff; word-break: break-all;">
+                {reset_link}
+            </a>
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #1e3a5f; margin: 30px 0;" />
+
+        <p style="color: #475569; font-size: 12px; text-align: center;">
+            If you did not request a password reset, ignore this email —
+            your password will remain unchanged.
+            <br/><br/>
+            © 2026 IntruSense AI NIDS. All rights reserved.
+        </p>
+    </div>
+    """
+
+    message = MessageSchema(
+        subject="IntruSense — Password Reset Request",
+        recipients=[email],
+        body=html_body,
+        subtype=MessageType.html
+    )
+
+    await fast_mail.send_message(message)
 
 # ── Request models ────────────────────────────────────────────────────────────
 class RegisterRequest(BaseModel):
@@ -193,6 +265,27 @@ class LoginRequest(BaseModel):
     @classmethod
     def normalise_email(cls, v: str) -> str:
         return v.lower().strip()
+
+    @field_validator("password")
+    @classmethod
+    def password_must_not_be_blank(cls, v: str) -> str:
+        if not v:
+            raise ValueError("Password must not be blank.")
+        return v
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+    @field_validator("email")
+    @classmethod
+    def normalise_email(cls, v: str) -> str:
+        return v.lower().strip()
+
+
+class ResetPasswordRequest(BaseModel):
+    token:    str
+    password: str
 
     @field_validator("password")
     @classmethod
@@ -283,6 +376,55 @@ async def exchange_oauth_code(request: Request, code: str):
             detail="Invalid or expired OAuth code. Please sign in again."
         )
     return {"token": entry["token"], "name": entry["name"]}
+
+@app.post("/auth/forgot-password")
+@limiter.limit("5/hour")
+async def forgot_password(request: Request, req: ForgotPasswordRequest):
+    """
+    Step 1 of password reset.
+    Always returns 200 regardless of whether the email exists —
+    this prevents attackers from enumerating registered emails.
+    """
+    reset_token = await mongo_client.create_reset_token(req.email)
+
+    if reset_token and fast_mail:
+        try:
+            await send_reset_email(req.email, reset_token)
+        except Exception as e:
+            print(f"❌ Failed to send reset email: {e}")
+            # Still return 200 — don't leak mail config errors to client
+
+    # Always return the same response whether email exists or not
+    return {
+        "message": "If that email is registered you will receive a password reset link shortly."
+    }
+
+@app.post("/auth/reset-password")
+@limiter.limit("10/hour")
+async def reset_password(request: Request, req: ResetPasswordRequest):
+    """
+    Step 2 of password reset.
+    Validates the token and updates the password.
+    """
+    result = await mongo_client.reset_password(req.token, req.password)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return {"message": "Password reset successfully. You can now log in with your new password."}
+
+@app.get("/auth/verify-reset-token")
+@limiter.limit("20/minute")
+async def verify_reset_token(request: Request, token: str):
+    """
+    Called by the frontend Reset Password page on load to verify
+    the token is still valid before showing the new password form.
+    """
+    email = await mongo_client.verify_reset_token(token)
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired reset link. Please request a new one."
+        )
+    return {"valid": True}
 
 # ── Core API routes ───────────────────────────────────────────────────────────
 @app.get("/")
@@ -395,22 +537,12 @@ async def delete_single_log(
         raise HTTPException(status_code=404, detail="Log not found or could not be deleted")
     return {"success": True, "deleted": log_id}
 
-
-# ── FIX #10: Two-step confirmation for bulk delete ────────────────────────────
-
 @app.post("/api/logs/delete-confirm")
 @limiter.limit("10/minute")
 async def request_delete_confirmation(
     request:       Request,
     authorization: Optional[str] = Header(default="")
 ):
-    """
-    Step 1 of bulk delete.
-    The client calls this first to get a short-lived confirmation token.
-    The token expires in 60 seconds and is tied to the requesting user.
-    This prevents stray or replayed DELETE /api/logs requests from
-    succeeding even with a valid JWT.
-    """
     user_email    = require_auth(authorization)
     confirm_token = _issue_delete_token(user_email)
     return {
@@ -419,7 +551,6 @@ async def request_delete_confirmation(
         "message":       "Pass this token as ?confirm_token= to DELETE /api/logs within 60 seconds."
     }
 
-
 @app.delete("/api/logs")
 @limiter.limit("5/minute")
 async def delete_all_logs(
@@ -427,27 +558,17 @@ async def delete_all_logs(
     confirm_token: Optional[str] = Query(default=None),
     authorization: Optional[str] = Header(default="")
 ):
-    """
-    Step 2 of bulk delete.
-    Requires both a valid JWT (who you are) AND a valid confirmation
-    token issued by POST /api/logs/delete-confirm (you meant to do this).
-    Both must match — the token is user-scoped so it cannot be used by
-    a different authenticated user.
-    """
     user_email = require_auth(authorization)
 
-    # Confirmation token is mandatory for bulk delete
     if not confirm_token:
         raise HTTPException(
             status_code=400,
             detail=(
                 "Bulk delete requires a confirmation token. "
-                "First call POST /api/logs/delete-confirm to obtain one, "
-                "then pass it as ?confirm_token= to this endpoint."
+                "First call POST /api/logs/delete-confirm to obtain one."
             )
         )
 
-    # Redeem the token — verifies it exists, is not expired, and belongs to this user
     if not _redeem_delete_token(confirm_token, user_email):
         raise HTTPException(
             status_code=403,
@@ -456,7 +577,6 @@ async def delete_all_logs(
 
     deleted = await es_client.delete_all_logs(user_email)
     return {"success": True, "deleted_count": deleted}
-
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 @app.websocket("/ws")

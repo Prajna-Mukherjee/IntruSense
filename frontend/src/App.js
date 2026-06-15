@@ -10,6 +10,8 @@ import LiveFeed           from './components/LiveFeed';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import Login              from './components/Login';
 import Register           from './components/Register';
+import ForgotPassword     from './components/ForgotPassword';
+import ResetPassword      from './components/ResetPassword';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 const WS_URL  = (process.env.REACT_APP_API_URL || 'http://localhost:8000')
@@ -82,16 +84,10 @@ function OAuthCallback() {
 
   useEffect(() => {
     const code = searchParams.get('code');
-    if (!code) {
-      navigate('/login');
-      return;
-    }
+    if (!code) { navigate('/login'); return; }
     setSearchParams({}, { replace: true });
     fetch(`${API_URL}/auth/exchange?code=${encodeURIComponent(code)}`)
-      .then(res => {
-        if (!res.ok) throw new Error('Exchange failed');
-        return res.json();
-      })
+      .then(res => { if (!res.ok) throw new Error('Exchange failed'); return res.json(); })
       .then(data => {
         sessionStorage.setItem('intrusense_auth', data.token);
         sessionStorage.setItem('intrusense_name', data.name);
@@ -150,14 +146,10 @@ function Dashboard() {
     if (!token) return;
 
     const socket = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
-
     socket.onopen    = () => { setWsConnected(true); };
     socket.onclose   = (e) => {
       setWsConnected(false);
-      if (e.code === 4001) {
-        navigate('/login');
-        return;
-      }
+      if (e.code === 4001) { navigate('/login'); return; }
       setTimeout(connectWS, 3000);
     };
     socket.onerror   = () => { setWsConnected(false); };
@@ -186,10 +178,7 @@ function Dashboard() {
       setAlerts(prev => [...threats, ...prev].slice(0, 100));
       setAllResults(prev => [...all, ...prev].slice(0, 500));
       if (threats.length > 0) setSelectedAlert(threats[0]);
-      setTimeout(() => {
-        fetchStats();
-        setRefreshKey(k => k + 1);
-      }, 1500);
+      setTimeout(() => { fetchStats(); setRefreshKey(k => k + 1); }, 1500);
     }
   };
 
@@ -220,14 +209,8 @@ function Dashboard() {
               fontSize: '13px', fontWeight: 600, cursor: 'pointer',
               display: 'flex', alignItems: 'center', gap: '6px', transition: 'all 0.2s',
             }}
-            onMouseEnter={e => {
-              e.currentTarget.style.background  = 'rgba(239,68,68,0.2)';
-              e.currentTarget.style.borderColor = 'rgba(239,68,68,0.6)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background  = 'rgba(239,68,68,0.1)';
-              e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)';
-            }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.2)'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.6)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; e.currentTarget.style.borderColor = 'rgba(239,68,68,0.3)'; }}
           >
             <span>🚪</span> Logout
           </button>
@@ -238,7 +221,6 @@ function Dashboard() {
         {activeTab === 'overview' && (
           <div style={styles.grid}>
             <StatsBar stats={stats} />
-
             <div style={{ ...styles.row, gridTemplateColumns: '340px 1fr' }}>
               <div style={styles.card}>
                 <div style={styles.cardTitle}><span>📤</span> Upload Logs</div>
@@ -249,7 +231,6 @@ function Dashboard() {
                 <AlertPanel alerts={alerts} onSelect={setSelectedAlert} selected={selectedAlert} />
               </div>
             </div>
-
             {selectedAlert && (
               <div style={{ ...styles.row, gridTemplateColumns: '200px 1fr 320px' }}>
                 <div style={styles.card}>
@@ -266,14 +247,12 @@ function Dashboard() {
                 </div>
               </div>
             )}
-
             <div style={styles.card}>
               <div style={styles.cardTitle}><span>📡</span> Live Detection Feed</div>
               <LiveFeed apiUrl={API_URL} authHeaders={headers} refreshKey={refreshKey} />
             </div>
           </div>
         )}
-
         {activeTab === 'analytics' && (
           <AnalyticsDashboard authHeaders={headers} externalAlerts={allResults} />
         )}
@@ -286,11 +265,13 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login"         element={<Login />} />
-        <Route path="/register"      element={<Register />} />
-        <Route path="/dashboard"     element={<Dashboard />} />
-        <Route path="/auth/callback" element={<OAuthCallback />} />
-        <Route path="/"              element={<Navigate to="/login" replace />} />
+        <Route path="/login"            element={<Login />} />
+        <Route path="/register"         element={<Register />} />
+        <Route path="/dashboard"        element={<Dashboard />} />
+        <Route path="/auth/callback"    element={<OAuthCallback />} />
+        <Route path="/forgot-password"  element={<ForgotPassword />} />
+        <Route path="/reset-password"   element={<ResetPassword />} />
+        <Route path="/"                 element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
   );

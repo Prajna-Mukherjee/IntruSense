@@ -1,17 +1,13 @@
 """
 MongoDB client for user authentication.
-Handles user registration, login verification, and JWT tokens.
-
-Supports both:
-  - Local MongoDB: mongodb://localhost:27017/intrusense  (no TLS)
-  - MongoDB Atlas: mongodb+srv://...                     (TLS required)
-
-The connection mode is detected automatically from MONGO_URI in .env.
+Handles user registration, login verification, JWT tokens,
+and password reset token management.
 """
 
 import os
 import re
 import bcrypt
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -19,8 +15,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from jose import jwt, JWTError
 
 # ── Config ────────────────────────────────────────────────────────────────────
-JWT_ALGO    = "HS256"
-JWT_EXPIRES = 24  # hours
+JWT_ALGO            = "HS256"
+JWT_EXPIRES         = 24    # hours
+RESET_TOKEN_EXPIRES = 30    # minutes
 
 # ── Common passwords blocklist ────────────────────────────────────────────────
 COMMON_PASSWORDS = {
@@ -36,39 +33,24 @@ COMMON_PASSWORDS = {
 
 
 def validate_password(password: str) -> tuple[bool, str]:
-    """
-    Validate password strength. Returns (is_valid, error_message).
-    """
     if len(password) < 8:
         return False, "Password must be at least 8 characters."
-
     if len(password) > 128:
         return False, "Password must be no more than 128 characters."
-
     if not re.search(r"[A-Z]", password):
         return False, "Password must contain at least one uppercase letter."
-
     if not re.search(r"[a-z]", password):
         return False, "Password must contain at least one lowercase letter."
-
     if not re.search(r"\d", password):
         return False, "Password must contain at least one number."
-
     if not re.search(r"[!@#$%^&*()_+\-=\[\]{}|;':\",./<>?`~\\]", password):
         return False, "Password must contain at least one special character (!@#$%^&* etc)."
-
     if password.lower() in COMMON_PASSWORDS:
         return False, "This password is too common. Please choose a more unique password."
-
     return True, ""
 
 
 def _is_atlas_uri(uri: str) -> bool:
-    """
-    Returns True if the URI is a MongoDB Atlas connection string.
-    Atlas URIs use the +srv scheme or contain .mongodb.net
-    Local URIs look like mongodb://localhost:27017
-    """
     return "mongodb+srv://" in uri or ".mongodb.net" in uri
 
 
@@ -77,10 +59,11 @@ def _is_atlas_uri(uri: str) -> bool:
 class MongoAuthClient:
 
     def __init__(self):
-        self.client     = None
-        self.db         = None
-        self.users      = None
-        self._connected = False
+        self.client        = None
+        self.db            = None
+        self.users         = None
+        self.reset_tokens  = None   # separate collection for reset tokens
+        self._connected    = False
 
     async def connect(self):
         mongo_uri = os.getenv("MONGO_URI", "").strip()
@@ -89,10 +72,6 @@ class MongoAuthClient:
             print("⚠️  MONGO_URI not set in .env — user auth will not work")
             return
 
-        # ── FIX: Detect connection type and set TLS accordingly ───────────────
-        # Local MongoDB does not use TLS — forcing tls=True on a local
-        # connection causes an immediate connection failure.
-        # Atlas always requires TLS.
         is_atlas = _is_atlas_uri(mongo_uri)
 
         try:
@@ -113,17 +92,21 @@ class MongoAuthClient:
                     serverSelectionTimeoutMS=5000,
                     connectTimeoutMS=5000,
                     socketTimeoutMS=10000
-                    # No TLS for local instance
                 )
 
-            # Force an actual network round-trip to verify connection
             await self.client.admin.command("ping")
 
-            self.db    = self.client["intrusense"]
-            self.users = self.db["users"]
+            self.db           = self.client["intrusense"]
+            self.users        = self.db["users"]
+            self.reset_tokens = self.db["reset_tokens"]
 
-            # Ensure unique index on email
             await self.users.create_index("email", unique=True)
+
+            # TTL index — MongoDB auto-deletes expired reset tokens
+            await self.reset_tokens.create_index(
+                "expires_at",
+                expireAfterSeconds=0
+            )
 
             self._connected = True
             mode = "Atlas" if is_atlas else "local"
@@ -136,10 +119,11 @@ class MongoAuthClient:
             else:
                 print("   → Check: 1) MongoDB is running: sudo systemctl status mongod")
                 print("             2) MONGO_URI in .env is: mongodb://localhost:27017/intrusense")
-            self.client     = None
-            self.db         = None
-            self.users      = None
-            self._connected = False
+            self.client        = None
+            self.db            = None
+            self.users         = None
+            self.reset_tokens  = None
+            self._connected    = False
 
     def is_connected(self) -> bool:
         return self._connected
@@ -162,20 +146,17 @@ class MongoAuthClient:
 
     def _jwt_secret(self) -> str:
         secret = os.getenv("JWT_SECRET", "").strip()
-
         if not secret:
             raise RuntimeError(
                 "JWT_SECRET is not set in your .env file. "
                 "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
             )
-
         if len(secret) < 32:
             raise RuntimeError(
                 f"JWT_SECRET is too short ({len(secret)} chars). "
                 "It must be at least 32 characters. "
                 "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
             )
-
         return secret
 
     def create_token(self, email: str, name: str) -> str:
@@ -191,6 +172,100 @@ class MongoAuthClient:
             return jwt.decode(token, self._jwt_secret(), algorithms=[JWT_ALGO])
         except JWTError:
             return None
+
+    # ── Password reset ────────────────────────────────────────────────────────
+
+    async def create_reset_token(self, email: str) -> Optional[str]:
+        """
+        Generate a secure reset token for the given email.
+        Stores it in the reset_tokens collection with a 30-minute expiry.
+        Returns the token string, or None if the email is not registered.
+        """
+        if not self.is_connected():
+            return None
+
+        # Verify the email exists before issuing a token
+        user = await self.users.find_one({"email": email.lower().strip()})
+        if not user:
+            # Return None silently — the endpoint will still return 200
+            # to avoid leaking which emails are registered
+            return None
+
+        if user.get("auth_provider") == "google":
+            # Google accounts have no password to reset
+            return None
+
+        # Delete any existing unused token for this email
+        await self.reset_tokens.delete_many({"email": email.lower().strip()})
+
+        # Generate a cryptographically secure token
+        token = secrets.token_urlsafe(32)
+
+        await self.reset_tokens.insert_one({
+            "email":      email.lower().strip(),
+            "token":      token,
+            "expires_at": datetime.utcnow() + timedelta(minutes=RESET_TOKEN_EXPIRES),
+            "used":       False
+        })
+
+        return token
+
+    async def verify_reset_token(self, token: str) -> Optional[str]:
+        """
+        Verify a reset token is valid, not expired, and not used.
+        Returns the associated email if valid, None otherwise.
+        """
+        if not self.is_connected():
+            return None
+
+        record = await self.reset_tokens.find_one({
+            "token": token,
+            "used":  False
+        })
+
+        if not record:
+            return None
+
+        if datetime.utcnow() > record["expires_at"]:
+            await self.reset_tokens.delete_one({"token": token})
+            return None
+
+        return record["email"]
+
+    async def reset_password(self, token: str, new_password: str) -> dict:
+        """
+        Reset a user's password using a valid reset token.
+        Marks the token as used immediately to prevent reuse.
+        """
+        if not self.is_connected():
+            return {"success": False, "error": "Database not connected"}
+
+        # Validate the token
+        email = await self.verify_reset_token(token)
+        if not email:
+            return {"success": False, "error": "Invalid or expired reset link. Please request a new one."}
+
+        # Validate the new password strength
+        is_valid, error_msg = validate_password(new_password)
+        if not is_valid:
+            return {"success": False, "error": error_msg}
+
+        # Mark token as used immediately — single use only
+        await self.reset_tokens.update_one(
+            {"token": token},
+            {"$set": {"used": True}}
+        )
+
+        # Update the password
+        try:
+            await self.users.update_one(
+                {"email": email},
+                {"$set": {"password_hash": self.hash_password(new_password)}}
+            )
+            return {"success": True, "email": email}
+        except Exception as e:
+            print(f"❌ reset_password DB error: {e}")
+            return {"success": False, "error": "Password reset failed. Please try again."}
 
     # ── User operations ───────────────────────────────────────────────────────
 
