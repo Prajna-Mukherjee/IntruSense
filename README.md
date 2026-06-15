@@ -7,6 +7,7 @@
 ## 👤 Author
 
 **Mohammad Sarfraz Ilahi**
+
 MCA Student · FullStack Web and App Developer Enthusiast · Flutter and React
 📧 prajnamukherjee@gmail.com  
 🔗 [GitHub](https://github.com/Mohammad-Sarfraz-Ilahi) 
