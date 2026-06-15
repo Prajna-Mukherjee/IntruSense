@@ -1,6 +1,12 @@
 """
 MongoDB client for user authentication.
 Handles user registration, login verification, and JWT tokens.
+
+Supports both:
+  - Local MongoDB: mongodb://localhost:27017/intrusense  (no TLS)
+  - MongoDB Atlas: mongodb+srv://...                     (TLS required)
+
+The connection mode is detected automatically from MONGO_URI in .env.
 """
 
 import os
@@ -17,8 +23,6 @@ JWT_ALGO    = "HS256"
 JWT_EXPIRES = 24  # hours
 
 # ── Common passwords blocklist ────────────────────────────────────────────────
-# A minimal but effective blocklist of the most commonly used passwords.
-# These would pass an 8-character length check but are trivially guessable.
 COMMON_PASSWORDS = {
     "password", "password1", "password123", "password1234",
     "12345678", "123456789", "1234567890", "111111111",
@@ -34,16 +38,6 @@ COMMON_PASSWORDS = {
 def validate_password(password: str) -> tuple[bool, str]:
     """
     Validate password strength. Returns (is_valid, error_message).
-
-    Rules:
-    - At least 8 characters
-    - At least one uppercase letter
-    - At least one lowercase letter
-    - At least one digit
-    - At least one special character
-    - Not in the common passwords blocklist
-    - Not excessively long (prevents bcrypt DoS — bcrypt silently truncates
-      inputs over 72 bytes, so we cap at 128 chars to be explicit)
     """
     if len(password) < 8:
         return False, "Password must be at least 8 characters."
@@ -69,6 +63,15 @@ def validate_password(password: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _is_atlas_uri(uri: str) -> bool:
+    """
+    Returns True if the URI is a MongoDB Atlas connection string.
+    Atlas URIs use the +srv scheme or contain .mongodb.net
+    Local URIs look like mongodb://localhost:27017
+    """
+    return "mongodb+srv://" in uri or ".mongodb.net" in uri
+
+
 # ── Client ────────────────────────────────────────────────────────────────────
 
 class MongoAuthClient:
@@ -86,29 +89,53 @@ class MongoAuthClient:
             print("⚠️  MONGO_URI not set in .env — user auth will not work")
             return
 
-        try:
-            self.client = AsyncIOMotorClient(
-                mongo_uri,
-                serverSelectionTimeoutMS=5000,
-                connectTimeoutMS=5000,
-                socketTimeoutMS=10000,
-                tls=True,
-                tlsAllowInvalidCertificates=False
-            )
+        # ── FIX: Detect connection type and set TLS accordingly ───────────────
+        # Local MongoDB does not use TLS — forcing tls=True on a local
+        # connection causes an immediate connection failure.
+        # Atlas always requires TLS.
+        is_atlas = _is_atlas_uri(mongo_uri)
 
+        try:
+            if is_atlas:
+                print("🌐 Connecting to MongoDB Atlas...")
+                self.client = AsyncIOMotorClient(
+                    mongo_uri,
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=5000,
+                    socketTimeoutMS=10000,
+                    tls=True,
+                    tlsAllowInvalidCertificates=False
+                )
+            else:
+                print("🍃 Connecting to local MongoDB...")
+                self.client = AsyncIOMotorClient(
+                    mongo_uri,
+                    serverSelectionTimeoutMS=5000,
+                    connectTimeoutMS=5000,
+                    socketTimeoutMS=10000
+                    # No TLS for local instance
+                )
+
+            # Force an actual network round-trip to verify connection
             await self.client.admin.command("ping")
 
             self.db    = self.client["intrusense"]
             self.users = self.db["users"]
 
+            # Ensure unique index on email
             await self.users.create_index("email", unique=True)
 
             self._connected = True
-            print("✅ MongoDB connected — user auth ready")
+            mode = "Atlas" if is_atlas else "local"
+            print(f"✅ MongoDB connected ({mode}) — user auth ready")
 
         except Exception as e:
             print(f"❌ MongoDB connection failed: {e}")
-            print("   → Check: 1) MONGO_URI in .env  2) Atlas IP whitelist  3) DB user password")
+            if is_atlas:
+                print("   → Check: 1) MONGO_URI in .env  2) Atlas IP whitelist  3) DB user password")
+            else:
+                print("   → Check: 1) MongoDB is running: sudo systemctl status mongod")
+                print("             2) MONGO_URI in .env is: mongodb://localhost:27017/intrusense")
             self.client     = None
             self.db         = None
             self.users      = None
@@ -134,12 +161,6 @@ class MongoAuthClient:
     # ── JWT helpers ───────────────────────────────────────────────────────────
 
     def _jwt_secret(self) -> str:
-        """
-        Read JWT_SECRET at call-time (after load_dotenv has run in main.py).
-        Raises RuntimeError if the secret is missing or too short so that
-        a misconfigured deployment fails loudly instead of running with a
-        known-weak fallback key.
-        """
         secret = os.getenv("JWT_SECRET", "").strip()
 
         if not secret:
@@ -181,7 +202,6 @@ class MongoAuthClient:
         if existing:
             return {"success": False, "error": "Email already registered"}
 
-        # ── FIX #8: Strong password validation ───────────────────────────────
         is_valid, error_msg = validate_password(password)
         if not is_valid:
             return {"success": False, "error": error_msg}
