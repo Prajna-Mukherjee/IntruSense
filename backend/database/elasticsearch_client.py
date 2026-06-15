@@ -29,12 +29,25 @@ INDEX_MAPPING = {
 }
 
 
+def _is_cloud_host(host: str) -> bool:
+    """
+    Returns True if the host is a cloud-hosted OpenSearch/Elasticsearch
+    instance (Bonsai, AWS, Elastic Cloud etc).
+    Local instances use http://localhost or http://127.0.0.1
+    """
+    return (
+        "https://" in host and
+        "localhost" not in host and
+        "127.0.0.1" not in host
+    )
+
+
 class InMemoryStorage:
     def __init__(self):
         self.logs = []
 
     async def create_index(self):
-        print("📦 Using in-memory storage (no ES/Bonsai configured)")
+        print("📦 Using in-memory storage (no OpenSearch configured)")
 
     async def index_log(self, result: dict, user_email: str = ""):
         entry = {
@@ -54,34 +67,21 @@ class InMemoryStorage:
         return filtered[-size:][::-1]
 
     async def delete_log(self, log_id: str, es_id: str = "", user_email: str = "") -> bool:
-        """
-        Always enforces user_email ownership — even when es_id is supplied.
-        A log is only deleted if BOTH the ID matches AND it belongs to the
-        requesting user. Passing es_id without a matching user_email is denied.
-        """
         if not user_email:
             return False
-
         before = len(self.logs)
         self.logs = [
             l for l in self.logs
             if not (
                 (l.get("log_id") == log_id or l.get("_es_id") == es_id)
-                and l.get("user_email") == user_email   # ownership always checked
+                and l.get("user_email") == user_email
             )
         ]
         return len(self.logs) < before
 
     async def delete_all_logs(self, user_email: str = "") -> int:
-        """
-        Only deletes logs belonging to the requesting user.
-        An empty user_email is rejected — never wipes all logs.
-        """
         if not user_email:
-            # FIX: previously this branch wiped ALL logs when user_email was empty.
-            # Now it is a hard no-op so an unauthenticated call cannot nuke the store.
             return 0
-
         before = len(self.logs)
         self.logs = [l for l in self.logs if l.get("user_email") != user_email]
         return before - len(self.logs)
@@ -117,6 +117,7 @@ class ElasticsearchClient:
         if not ES_AVAILABLE:
             return
 
+        # Read host from env — ES_HOST takes priority, falls back to local
         host = (
             os.getenv("ES_HOST", "").strip() or
             os.getenv("ES_LOCAL_HOST", "").strip() or
@@ -124,17 +125,35 @@ class ElasticsearchClient:
         )
 
         try:
-            self.es = AsyncOpenSearch(
-                hosts=[host],
-                use_ssl="https://" in host,
-                verify_certs=True,
-                ssl_show_warn=False,
-            )
+            is_cloud = _is_cloud_host(host)
+
+            if is_cloud:
+                # Cloud instance (Bonsai, AWS OpenSearch etc)
+                # Requires SSL and certificate verification
+                print(f"🌐 Connecting to cloud OpenSearch: {host}")
+                self.es = AsyncOpenSearch(
+                    hosts=[host],
+                    use_ssl=True,
+                    verify_certs=True,
+                    ssl_show_warn=False,
+                )
+            else:
+                # Local instance — no SSL, no cert verification needed
+                # security plugin is disabled in setup.sh so no auth either
+                print(f"🔍 Connecting to local OpenSearch: {host}")
+                self.es = AsyncOpenSearch(
+                    hosts=[host],
+                    use_ssl=False,
+                    verify_certs=False,
+                    ssl_show_warn=False,
+                )
+
             self.use_es = True
-            source = "Bonsai" if "bonsaisearch.net" in host else "local"
+            source = "cloud" if is_cloud else "local"
             print(f"✅ OpenSearch client initialized ({source})")
+
         except Exception as e:
-            print(f"⚠️  Elasticsearch init failed: {e}. Using in-memory.")
+            print(f"⚠️  OpenSearch init failed: {e}. Using in-memory storage.")
             self.use_es = False
 
     async def create_index(self):
@@ -143,10 +162,12 @@ class ElasticsearchClient:
                 exists = await self.es.indices.exists(index=INDEX_NAME)
                 if not exists:
                     await self.es.indices.create(index=INDEX_NAME, body=INDEX_MAPPING)
-                    print(f"✅ ES index '{INDEX_NAME}' created")
+                    print(f"✅ OpenSearch index '{INDEX_NAME}' created")
+                else:
+                    print(f"✅ OpenSearch index '{INDEX_NAME}' already exists")
                 return
             except Exception as e:
-                print(f"⚠️  ES index error: {e}. Falling back to memory.")
+                print(f"⚠️  OpenSearch index error: {e}. Falling back to memory.")
                 self.use_es = False
         await self._fallback.create_index()
 
@@ -172,7 +193,7 @@ class ElasticsearchClient:
                 doc["_es_id"] = res["_id"]
                 return
             except Exception as e:
-                print(f"⚠️  ES index_log failed: {e}. Falling back to in-memory for this entry.")
+                print(f"⚠️  OpenSearch index_log failed: {e}. Falling back to in-memory.")
         await self._fallback.index_log(result, user_email)
 
     async def get_recent_logs(self, size: int = 50, user_email: str = "") -> list:
@@ -192,55 +213,34 @@ class ElasticsearchClient:
                     logs.append(entry)
                 return logs
             except Exception as e:
-                print(f"⚠️  ES get_recent_logs failed: {e}. Falling back to memory.")
+                print(f"⚠️  OpenSearch get_recent_logs failed: {e}. Falling back to memory.")
         return await self._fallback.get_recent_logs(size, user_email)
 
     async def delete_log(self, log_id: str, es_id: str = "", user_email: str = "") -> bool:
-        """
-        FIX #5: Ownership is ALWAYS enforced, even when es_id is provided.
-
-        Previously when es_id was supplied, the code did:
-            self.es.delete(index=INDEX_NAME, id=es_id)
-        with no user_email check — any authenticated user could delete
-        anyone else's document by guessing or observing an es_id.
-
-        Now we ALWAYS use delete_by_query with both the document ID
-        AND the user_email in the must clause, regardless of which ID
-        type was supplied. This means the document is only deleted if
-        it belongs to the requesting user.
-        """
         if not user_email:
             return False
 
         if self.use_es:
             try:
-                # Build the must clause — always include user_email for ownership
                 must = [{"term": {"user_email": user_email}}]
 
                 if es_id:
-                    # Use _id filter to match the Elasticsearch internal document ID
                     must.append({"ids": {"values": [es_id]}})
                 else:
-                    # Fall back to matching on our application-level log_id field
                     must.append({"term": {"log_id": log_id}})
 
                 result = await self.es.delete_by_query(
                     index=INDEX_NAME,
                     body={"query": {"bool": {"must": must}}}
                 )
-                deleted_count = result.get("deleted", 0)
-                return deleted_count > 0
+                return result.get("deleted", 0) > 0
 
             except Exception as e:
-                print(f"⚠️  ES delete_log failed: {e}. Falling back to memory.")
+                print(f"⚠️  OpenSearch delete_log failed: {e}. Falling back to memory.")
 
         return await self._fallback.delete_log(log_id, es_id, user_email)
 
     async def delete_all_logs(self, user_email: str = "") -> int:
-        """
-        Only deletes logs belonging to the requesting user.
-        Rejects empty user_email — never issues a delete-all query.
-        """
         if not user_email:
             return 0
 
@@ -253,7 +253,7 @@ class ElasticsearchClient:
                 )
                 return result.get("deleted", 0)
             except Exception as e:
-                print(f"⚠️  ES delete_all_logs failed: {e}. Falling back to memory.")
+                print(f"⚠️  OpenSearch delete_all_logs failed: {e}. Falling back to memory.")
 
         return await self._fallback.delete_all_logs(user_email)
 
@@ -292,6 +292,6 @@ class ElasticsearchClient:
                     "detection_rate":      round(threats / total * 100, 2) if total > 0 else 0
                 }
             except Exception as e:
-                print(f"⚠️  ES get_stats failed: {e}. Falling back to memory.")
+                print(f"⚠️  OpenSearch get_stats failed: {e}. Falling back to memory.")
 
         return await self._fallback.get_stats(user_email)
